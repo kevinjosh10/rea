@@ -28,7 +28,11 @@ import {
   bridgeCandidateCoverageSchema,
   projectCartesianCandidates,
 } from "../bridgeCandidateProjection.js";
-import { projectionDigest } from "../mobileApplicationGraphProjection.js";
+import {
+  projectionDigest,
+  unavailableComponentSchema,
+  unavailableComponents,
+} from "../mobileApplicationGraphProjection.js";
 import { compareUnicodeCodePoints as compare } from "../unicodeCodePointOrder.js";
 
 const evidenceIdSchema = prefixedDigestSchema("ev");
@@ -63,6 +67,7 @@ export const appleApplicationProjectionResultSchema = z.strictObject({
     ),
     helpers: z.array(appleComponentSchema),
   }),
+  unavailable_components: z.array(unavailableComponentSchema),
   symlinks: z.array(pathSchema),
   runtime_families: z.array(
     z.enum([
@@ -154,6 +159,17 @@ export const projectAppleApplication = (
     roots,
     rootFormat,
   );
+  const allUnavailable = unavailableComponents(inventory).filter(
+    ({ path }) => !isSidecar(path),
+  );
+  const unavailable = (
+    rootFormat === "ipa"
+      ? allUnavailable
+      : allUnavailable.filter(({ path }) =>
+          roots.some((root) => isWithin(path, root)),
+        )
+  ).sort((left, right) => compare(left.path, right.path));
+  const unattributedUnavailable = allUnavailable.length - unavailable.length;
   const bundles = detectBundles(entries, roots);
   const classified = classifyComponents(entries, all, roots);
   const runtimeFamilies = identifyRuntimeFamilies(all);
@@ -171,7 +187,8 @@ export const projectAppleApplication = (
     inventory,
     "container-entries",
   );
-  const complete = inventoryComplete && !uninventoriedImage;
+  const complete =
+    inventoryComplete && !uninventoriedImage && unavailable.length === 0;
   const limitations = [
     ...inventory.limitations,
     ...projectionLimitations({
@@ -181,7 +198,8 @@ export const projectAppleApplication = (
       bundles,
       sidecars: entries.some(({ path }) => isSidecar(path)),
       symlinks: entries.some(({ kind }) => kind === "symlink"),
-      unattributed,
+      unattributed: unattributed + unattributedUnavailable,
+      unavailable: unavailable.length > 0,
       bridgeCandidateCoverage: bridgeProjection.coverage,
     }),
   ];
@@ -195,6 +213,7 @@ export const projectAppleApplication = (
     application_roots: roots,
     bundles,
     components: classified,
+    unavailable_components: unavailable,
     symlinks: entries
       .filter(({ kind }) => kind === "symlink")
       .map(({ path }) => path)
@@ -402,6 +421,7 @@ const projectionLimitations = (facts: {
   readonly sidecars: boolean;
   readonly symlinks: boolean;
   readonly unattributed: number;
+  readonly unavailable: boolean;
   readonly bridgeCandidateCoverage: AppleApplicationProjectionResult["bridge_candidate_coverage"];
 }): string[] => [
   ...(!facts.complete
@@ -433,6 +453,11 @@ const projectionLimitations = (facts: {
   ...(facts.unattributed > 0
     ? [
         `${facts.unattributed} inventoried entries outside every application root are not attributed to the application.`,
+      ]
+    : []),
+  ...(facts.unavailable
+    ? [
+        "Some inventoried occurrences have no authenticated content identity. Their paths and limitations are retained in unavailable_components; component absence is unknown.",
       ]
     : []),
   ...(facts.sidecars

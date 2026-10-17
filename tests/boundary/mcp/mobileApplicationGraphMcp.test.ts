@@ -147,3 +147,47 @@ it("retains Harmony unavailable components and their source Evidence through MCP
     result: { records: expect.arrayContaining([inventory, evidence]) },
   });
 });
+
+it("retains Apple unavailable components and their source Evidence through MCP", async () => {
+  const client = await connect();
+  const root = await createTestTempDirectory("rea-apple-graph-mcp-");
+  const path = join(root, "Locked.ipa");
+  const writer = new ZipWriter(new Uint8ArrayWriter());
+  await writer.add(
+    "Payload/Fixture.app/Info.plist",
+    new TextReader("<plist></plist>"),
+  );
+  await writer.add(
+    "Payload/Fixture.app/libentry.dylib",
+    new TextReader("encrypted bytes"),
+    { password: "fixture-only" },
+  );
+  await writeFile(path, await writer.close());
+  const inventory = parseEvidence(
+    await runProviderAnalysis(path, "inventory_artifact", {}),
+  );
+  const reply = await client.callTool({
+    name: "project_apple_application_graph",
+    arguments: { inventory_evidence: [inventory] },
+  });
+  if (reply.isError === true) throw new Error(JSON.stringify(reply));
+  const evidence = parseEvidence(reply.structuredContent);
+  expect(evidence.normalized_result).toMatchObject({
+    unavailable_components: [
+      expect.objectContaining({
+        path: "Payload/Fixture.app/libentry.dylib",
+        artifact_id: null,
+        sha256: null,
+        encrypted: true,
+      }),
+    ],
+    coverage: { status: "partial", inventory_complete: true },
+  });
+  const bundle = await client.callTool({
+    name: "get_evidence_bundle",
+    arguments: {},
+  });
+  expect(bundle.structuredContent).toMatchObject({
+    result: { records: expect.arrayContaining([inventory, evidence]) },
+  });
+});

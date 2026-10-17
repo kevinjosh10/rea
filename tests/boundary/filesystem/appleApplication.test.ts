@@ -223,6 +223,50 @@ describe("Apple application projection", () => {
   });
 });
 
+describe("Apple application unavailable components", () => {
+  it("retains encrypted members in unavailable_components and discloses unknown absence", async () => {
+    const root = await createTestTempDirectory("rea-apple-encrypted-");
+    const path = join(root, "Encrypted.ipa");
+    const writer = new ZipWriter(new Uint8ArrayWriter());
+    await writer.add(
+      "Payload/Fixture.app/Info.plist",
+      new TextReader("<plist><dict/></plist>"),
+    );
+    await writer.add(
+      "Payload/Fixture.app/libentry.dylib",
+      new TextReader("encrypted native library"),
+      { password: "fixture-only" },
+    );
+    await writeFile(path, await writer.close());
+
+    const inventory = parseEvidence(
+      await runProviderAnalysis(path, "inventory_artifact", {}),
+    );
+    const projection = appleApplicationProjectionResultSchema.parse(
+      requireSuccessfulProjection(
+        projectAppleApplicationEvidence({ inventory_evidence: [inventory] }),
+      ).normalized_result,
+    );
+
+    expect(projection.unavailable_components).toContainEqual(
+      expect.objectContaining({
+        path: "Payload/Fixture.app/libentry.dylib",
+        artifact_id: null,
+        sha256: null,
+        encrypted: true,
+      }),
+    );
+    expect(projection.components.native_libraries).toEqual([]);
+    expect(projection.coverage).toMatchObject({
+      status: "partial",
+      inventory_complete: true,
+    });
+    expect(projection.limitations).toContainEqual(
+      expect.stringContaining("component absence is unknown"),
+    );
+  });
+});
+
 describe("macOS application projection", () => {
   it("projects a macOS .app directory inventory with nested bundle roles", async () => {
     const root = await createTestTempDirectory("rea-apple-macos-");

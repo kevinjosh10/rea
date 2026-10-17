@@ -106,7 +106,9 @@ export const unavailableComponents = (
   inventory.occurrences
     .filter(
       (occurrence) =>
-        occurrence.logical_path !== "." && occurrence.artifact_id === null,
+        occurrence.logical_path !== "." &&
+        occurrence.entry_kind === "file" &&
+        occurrence.artifact_id === null,
     )
     .map((occurrence) => ({
       path: occurrence.logical_path,

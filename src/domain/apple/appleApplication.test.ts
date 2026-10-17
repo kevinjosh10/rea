@@ -15,6 +15,7 @@ interface FixtureEntry {
   readonly path: string;
   readonly kind?: EntryKind;
   readonly format?: string;
+  readonly unreadable?: boolean;
 }
 
 const sha = (text: string): string =>
@@ -78,9 +79,22 @@ const inventoryEvidence = (
   });
   const nodes = new Map([[rootId, node(rootSha, rootFormat)]]);
   const occurrences = [occurrence(".", "file", rootId, rootFormat)];
-  for (const { path, kind = "file", format = "file" } of entries) {
+  for (const {
+    path,
+    kind = "file",
+    format = "file",
+    unreadable = false,
+  } of entries) {
     if (kind === "symlink") {
       occurrences.push(occurrence(path, kind, null));
+      continue;
+    }
+    if (unreadable) {
+      occurrences.push({
+        ...occurrence(path, kind, null, format),
+        encrypted: true,
+        hash_status: "unavailable",
+      });
       continue;
     }
     const contentSha = sha(`${kind}:${path}`);
@@ -733,4 +747,55 @@ describe("Apple path conventions", () => {
       );
     },
   );
+
+  it("retains unread files in unavailable_components, omits them from category arrays, and reports partial coverage", () => {
+    const unread = project(
+      inventoryEvidence("ipa", "Fixture.ipa", [
+        { path: "Payload/Fixture.app/Info.plist" },
+        {
+          path: "Payload/Fixture.app/libentry.dylib",
+          kind: "file",
+          format: "file",
+          unreadable: true,
+        },
+      ]),
+    );
+    expect(unread.unavailable_components).toEqual([
+      {
+        path: "Payload/Fixture.app/libentry.dylib",
+        artifact_id: null,
+        sha256: null,
+        format: "file",
+        encrypted: true,
+        limitations: [],
+      },
+    ]);
+    expect(unread.components.native_libraries).toEqual([]);
+    expect(unread.coverage).toEqual({
+      status: "partial",
+      inventory_complete: true,
+    });
+    expect(unread.limitations).toContain(
+      "Some inventoried occurrences have no authenticated content identity. Their paths and limitations are retained in unavailable_components; component absence is unknown.",
+    );
+
+    const control = project(
+      inventoryEvidence("ipa", "Fixture.ipa", [
+        { path: "Payload/Fixture.app/Info.plist" },
+        {
+          path: "Payload/Fixture.app/libentry.dylib",
+          kind: "file",
+          format: "file",
+        },
+      ]),
+    );
+    expect(control.unavailable_components).toEqual([]);
+    expect(control.components.native_libraries.map(({ path }) => path)).toEqual(
+      ["Payload/Fixture.app/libentry.dylib"],
+    );
+    expect(control.coverage).toEqual({
+      status: "complete-within-inventory",
+      inventory_complete: true,
+    });
+  });
 });
