@@ -132,6 +132,14 @@ describe("parseManifestPackage", () => {
       new TypeError("AndroidManifest.xml root must be <manifest>"),
     );
   });
+
+  it("reads package attribute when manifest contains literal U+FFFD", () => {
+    expect(
+      parseManifestPackage(
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.rea.app" android:versionName="\uFFFD" />',
+      ),
+    ).toBe("org.rea.app");
+  });
 });
 
 describe("parseDecodedStrings", () => {
@@ -244,5 +252,17 @@ describe("parseDecodedStrings", () => {
         '<resources><string name="styled">Hello <b>world</b></string></resources>',
       ),
     ).toEqual({ entries: [], unparsedCount: 1 });
+  });
+
+  it("projects string entries containing literal U+FFFD without treating the warning as malformed XML", () => {
+    const xml =
+      '<resources><string name="good">Hello</string><string name="edge">\uFFFD</string></resources>';
+    expect(parseDecodedStrings(xml)).toEqual({
+      entries: [
+        { name: "good", value: "Hello" },
+        { name: "edge", value: "\uFFFD" },
+      ],
+      unparsedCount: 0,
+    });
   });
 });
